@@ -86,7 +86,7 @@ func TestRoomSendQueued(t *testing.T) {
 
 	c, _ := r.client(id)
 	if len(c.msgs) != 1 {
-		t.Errorf("After room.send(%q, %q), room.client(%q).msgs = %v, want of size 1", id, m, c.msgs)
+		t.Errorf("After room.send(%q, %q), room.client(%q).msgs = %v, want of size 1", id, id, m, c.msgs)
 	}
 }
 
