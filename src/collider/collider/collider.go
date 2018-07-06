@@ -11,7 +11,7 @@ import (
 	"golang.org/x/net/websocket"
 	"encoding/json"
 	"errors"
-	"html"
+	//"html"
 	"io"
 	"io/ioutil"
 	"log"
@@ -19,6 +19,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	//"fmt"
+	"math/rand"
 )
 
 const registerTimeoutSec = 10
@@ -31,6 +33,36 @@ type Collider struct {
 	*roomTable
 	dash *dashboard
 }
+
+type Response_t struct{
+	Result string  `json:"result"`
+	Params Params_t `json:"params"`
+}
+
+type Params_t struct{
+	Room_id string `json:"room_id"`
+	Client_id string `json:"client_id"`
+	Wss_url string `json:"wss_url"`
+	Wss_post_url string `json:"wss_post_url"`
+	Is_initiator bool `json:"is_initiator"`
+	Pc_config Pc_config_t `json:"pc_config"`
+	Messages []string `json:"messages, omitempty"`
+}
+
+
+
+type Pc_config_t struct{
+	IceServers []IceServer_t `json:"iceServers"`
+}
+
+type IceServer_t struct{
+	Urls string `json:"urls"`
+	Credential string `json:"credential, omitempty"`
+	Username string `json:"username, omitempty"`
+}
+
+
+
 
 func NewCollider(rs string) *Collider {
 	return &Collider{
@@ -102,34 +134,149 @@ func (c *Collider) httpHandler(w http.ResponseWriter, r *http.Request) {
 
 	p := strings.Split(r.URL.Path, "/")
 	if len(p) != 3 {
-		c.httpError("Invalid path: "+html.EscapeString(r.URL.Path), w)
-		return
+		//c.httpError("Invalid path: "+html.EscapeString(r.URL.Path), w)
+		//return
 	}
-	rid, cid := p[1], p[2]
+	action, rid := p[1], p[2]
+
+    log.Print(rid)
+
+    cid := ""
+
+
+	switch action {
+        case "join":
+
+            initiator:=true
+            //todo: if room non empty initiator false
+            if len(c.roomTable.room(rid).clients) == 1 {
+                log.Print("not initiator")
+		        initiator = false
+	        }
+
+
+
+            cidi := 0
+            for true{
+                cidi = 10000000 + rand.Intn(90000000)
+                /*if err = c.roomTable.register(rid, cid, w); err != nil {
+                    continue
+                }*/ //TODO
+                break
+            }
+
+
+            cid = strconv.Itoa(cidi)
+                //c.dash.incrWs()
+
+               // defer c.roomTable.deregister(rid, cid)
+            log.Print("JOIN from " + cid)
+            stun1 := IceServer_t{"turn:leia.tureex.com:5349?transport=udp", "USERNAME", "CREDENTIAL"}
+            stun2 := IceServer_t{"turn:leia.tureex.com:5349?transport=tcp", "USERNAME", "CREDENTIAL"}
+            //TODO: add omitempty
+            turn := IceServer_t{Urls:"stun:leia.tureex.com:5349"}
+
+            servers := []IceServer_t{stun1, stun2, turn}
+
+            pc_config_ := Pc_config_t{servers}
+            var params Params_t
+
+            if initiator == false {
+            keys := make([]string, len(c.roomTable.room(rid).clients))
+            i := 0
+            for k := range c.roomTable.room(rid).clients {
+                keys[i] = k
+                i++
+            }
+            params = Params_t{rid,cid, "wss://leia2.tureex.com:443/ws", "https://leia2.tureex.com:443", initiator, pc_config_, c.roomTable.room(rid).clients[keys[0]].msgs} //todo:replace true
+            } else{
+            params = Params_t{Room_id: rid,Client_id: cid, Wss_url: "wss://leia2.tureex.com:443/ws",Wss_post_url: "https://leia2.tureex.com:443", Is_initiator: initiator, Pc_config: pc_config_} //todo:write label
+            }
+
+
+
+            response := Response_t{"SUCCESS", params}
+            b, _ := json.Marshal(response)
+            io.WriteString(w, string(b))
+		    c.roomTable.room(rid)
+		    c.roomTable.rooms[rid].client(cid)
+            return
+        case "message":
+
+
+
+            cid = p[3]
+            log.Print("MESSAGE from " + cid)
+            body, err := ioutil.ReadAll(r.Body)
+            if err != nil {
+                c.httpError("Failed to read request body: "+err.Error(), w)
+                return
+            }
+            m := string(body)
+            log.Print("m = " + m)
+            /*if m == "" {
+                log.Print("emptyyy")
+                c.httpError("Empty request body", w)
+                return
+            }*/
+            if err := c.roomTable.send(rid, cid, m); err != nil {
+                c.httpError("Failed to send the message: "+err.Error(), w)
+                return
+            }
+            return
+
+        case "leave":
+
+
+            cid = p[3]
+            log.Print("LEAVE from " + cid)
+            c.roomTable.remove(rid, cid)
+
+
+                //c.dash.incrWs()
+
+            //c.roomTable.deregister(rid, cid)
+            return
+
+	}
 
 	switch r.Method {
-	case "POST":
+
+	case "POST": //todo
+
+        rid = p[1]
+        cid = p[2]
+        log.Print("POST from " + cid)
+        log.Print(r.URL.Path)
+
 		body, err := ioutil.ReadAll(r.Body)
 		if err != nil {
 			c.httpError("Failed to read request body: "+err.Error(), w)
 			return
 		}
 		m := string(body)
-		if m == "" {
-			c.httpError("Empty request body", w)
-			return
-		}
+		log.Print("m= "+m)
+		/*if m == "" {
+			log.Print("emptyyy")
+			//c.httpError("Empty request body", w)
+			//return
+		}*/
 		if err := c.roomTable.send(rid, cid, m); err != nil {
 			c.httpError("Failed to send the message: "+err.Error(), w)
 			return
 		}
+		return
 	case "DELETE":
+	    rid = p[1]
+        cid = p[2]
+	    log.Print("DELETE from " + cid)
 		c.roomTable.remove(rid, cid)
+		return
 	default:
 		return
 	}
+    //log.Print(string(b))
 
-	io.WriteString(w, "OK\n")
 }
 
 // wsHandler is a WebSocket server that handles requests from the WebSocket client in the form of:
@@ -166,6 +313,7 @@ loop:
 
 		switch msg.Cmd {
 		case "register":
+		    log.Print("register")
 			if registered {
 				c.wsError("Duplicated register request", ws)
 				break loop
@@ -184,14 +332,19 @@ loop:
 			defer c.roomTable.deregister(rid, cid)
 			break
 		case "send":
+		    log.Print("send")
 			if !registered {
+			    log.Print("client not regist")
 				c.wsError("Client not registered", ws)
 				break loop
 			}
+			log.Print("send m " + msg.Msg)
 			if msg.Msg == "" {
+
 				c.wsError("Invalid send request: missing 'msg'", ws)
 				break loop
 			}
+
 			c.roomTable.send(rid, cid, msg.Msg)
 			break
 		default:
